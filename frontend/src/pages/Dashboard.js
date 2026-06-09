@@ -240,6 +240,9 @@ const Dashboard = () => {
                       <TableCell>所属库区</TableCell>
                       <TableCell>霉斑等级</TableCell>
                       <TableCell>当前湿度</TableCell>
+                      <TableCell>异味</TableCell>
+                      <TableCell>虫害</TableCell>
+                      <TableCell>风险说明</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -254,7 +257,34 @@ const Dashboard = () => {
                             sx={{ bgcolor: getMoldLevelColor(item.mold_level), color: 'white' }}
                           />
                         </TableCell>
-                        <TableCell>{item.humidity}%</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={`${item.humidity}%`}
+                            size="small"
+                            sx={{ bgcolor: getHumidityColor(item.humidity), color: 'white' }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {item.has_odor ? (
+                            <Chip label="有" size="small" color="error" />
+                          ) : (
+                            <Chip label="无" size="small" color="success" />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {item.has_pest ? (
+                            <Chip label="有" size="small" color="error" />
+                          ) : (
+                            <Chip label="无" size="small" color="success" />
+                          )}
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 200 }}>
+                          <MuiTooltip title={item.risk_description}>
+                            <Typography variant="body2" noWrap>
+                              {item.risk_description}
+                            </Typography>
+                          </MuiTooltip>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -262,7 +292,7 @@ const Dashboard = () => {
               </TableContainer>
             ) : (
               <Alert severity="success" icon={<CheckCircle />}>
-                当前无霉斑风险
+                当前无风险预警
               </Alert>
             )}
           </Paper>
@@ -293,7 +323,7 @@ const Dashboard = () => {
                           <Chip
                             label={getTaskStatusText(item.status)}
                             size="small"
-                            color={item.status === 'in_progress' ? 'primary' : 'default'}
+                            color={item.status === 'completed' ? 'success' : item.status === 'in_progress' ? 'primary' : 'default'}
                           />
                         </TableCell>
                         <TableCell sx={{ width: 150 }}>
@@ -316,7 +346,7 @@ const Dashboard = () => {
                 </Table>
               </TableContainer>
             ) : (
-              <Alert severity="info">暂无进行中的移架任务</Alert>
+              <Alert severity="info">暂无移架任务</Alert>
             )}
           </Paper>
         </Grid>

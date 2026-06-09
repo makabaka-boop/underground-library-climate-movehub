@@ -18,14 +18,24 @@ import {
   TextField,
   Snackbar,
   Alert,
+  Chip,
+  MenuItem,
 } from '@mui/material';
 import { Add, Edit, Delete } from '@mui/icons-material';
-import { getMovePlans, createMovePlan } from '../api';
+import { getMovePlans, createMovePlan, updateMovePlan, deleteMovePlan } from '../api';
+
+const planStatusOptions = [
+  { value: 'planning', label: '规划中' },
+  { value: 'in_progress', label: '执行中' },
+  { value: 'completed', label: '已完成' },
+];
 
 const MovePlans = () => {
   const [movePlans, setMovePlans] = useState([]);
   const [open, setOpen] = useState(false);
-  const [formData, setFormData] = useState({ name: '', description: '' });
+  const [editItem, setEditItem] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [formData, setFormData] = useState({ name: '', description: '', status: 'planning' });
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
   useEffect(() => {
@@ -49,20 +59,32 @@ const MovePlans = () => {
     setSnackbar({ ...snackbar, open: false });
   };
 
-  const handleOpen = () => {
-    setFormData({ name: '', description: '' });
+  const handleOpen = (item = null) => {
+    if (item) {
+      setEditItem(item);
+      setFormData({ name: item.name, description: item.description || '', status: item.status });
+    } else {
+      setEditItem(null);
+      setFormData({ name: '', description: '', status: 'planning' });
+    }
     setOpen(true);
   };
 
   const handleClose = () => {
     setOpen(false);
-    setFormData({ name: '', description: '' });
+    setEditItem(null);
+    setFormData({ name: '', description: '', status: 'planning' });
   };
 
   const handleSubmit = async () => {
     try {
-      await createMovePlan(formData);
-      showSnackbar('创建成功', 'success');
+      if (editItem) {
+        await updateMovePlan(editItem.id, formData);
+        showSnackbar('更新成功', 'success');
+      } else {
+        await createMovePlan({ name: formData.name, description: formData.description });
+        showSnackbar('创建成功', 'success');
+      }
       handleClose();
       loadData();
     } catch (error) {
@@ -70,11 +92,38 @@ const MovePlans = () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!deleteConfirm) return;
+    try {
+      await deleteMovePlan(deleteConfirm.id);
+      showSnackbar('删除成功', 'success');
+      setDeleteConfirm(null);
+      loadData();
+    } catch (error) {
+      showSnackbar(error.response?.data?.detail || '删除失败', 'error');
+      setDeleteConfirm(null);
+    }
+  };
+
+  const getPlanStatusLabel = (status) => {
+    const option = planStatusOptions.find((o) => o.value === status);
+    return option ? option.label : status;
+  };
+
+  const getPlanStatusColor = (status) => {
+    switch (status) {
+      case 'planning': return 'default';
+      case 'in_progress': return 'primary';
+      case 'completed': return 'success';
+      default: return 'default';
+    }
+  };
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">移架计划</Typography>
-        <Button variant="contained" startIcon={<Add />} onClick={handleOpen}>
+        <Button variant="contained" startIcon={<Add />} onClick={() => handleOpen()}>
           新增计划
         </Button>
       </Box>
@@ -86,7 +135,9 @@ const MovePlans = () => {
               <TableRow>
                 <TableCell>计划名称</TableCell>
                 <TableCell>描述</TableCell>
+                <TableCell>状态</TableCell>
                 <TableCell>创建时间</TableCell>
+                <TableCell align="center">操作</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -94,12 +145,27 @@ const MovePlans = () => {
                 <TableRow key={plan.id}>
                   <TableCell>{plan.name}</TableCell>
                   <TableCell>{plan.description || '-'}</TableCell>
+                  <TableCell>
+                    <Chip
+                      label={getPlanStatusLabel(plan.status)}
+                      size="small"
+                      color={getPlanStatusColor(plan.status)}
+                    />
+                  </TableCell>
                   <TableCell>{new Date(plan.created_at).toLocaleString()}</TableCell>
+                  <TableCell align="center">
+                    <IconButton size="small" onClick={() => handleOpen(plan)} title="编辑">
+                      <Edit />
+                    </IconButton>
+                    <IconButton size="small" color="error" onClick={() => setDeleteConfirm(plan)} title="删除">
+                      <Delete />
+                    </IconButton>
+                  </TableCell>
                 </TableRow>
               ))}
               {movePlans.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={3} align="center">
+                  <TableCell colSpan={5} align="center">
                     暂无数据
                   </TableCell>
                 </TableRow>
@@ -110,7 +176,7 @@ const MovePlans = () => {
       </Paper>
 
       <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-        <DialogTitle>新增移架计划</DialogTitle>
+        <DialogTitle>{editItem ? '编辑移架计划' : '新增移架计划'}</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
@@ -128,12 +194,42 @@ const MovePlans = () => {
               multiline
               rows={3}
             />
+            {editItem && (
+              <TextField
+                select
+                label="状态"
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                fullWidth
+              >
+                {planStatusOptions.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
           </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleClose}>取消</Button>
           <Button onClick={handleSubmit} variant="contained">
-            创建
+            {editItem ? '更新' : '创建'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)}>
+        <DialogTitle>确认删除</DialogTitle>
+        <DialogContent>
+          <Typography>
+            确定要删除计划「{deleteConfirm?.name}」吗？此操作不可撤销。
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirm(null)}>取消</Button>
+          <Button onClick={handleDelete} variant="contained" color="error">
+            删除
           </Button>
         </DialogActions>
       </Dialog>
