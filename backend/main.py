@@ -14,7 +14,7 @@ from schemas import (
     BookshelfCreate, BookshelfResponse,
     SensorPointCreate, SensorPointResponse,
     DehumidifierCreate, DehumidifierResponse,
-    MovePlanCreate, MovePlanResponse,
+    MovePlanCreate, MovePlanUpdate, MovePlanResponse,
     MoveTaskCreate, MoveTaskUpdate, MoveTaskResponse,
     InspectionRecordCreate, InspectionRecordResponse,
     DashboardResponse, DashboardStats, HumidityHeatmapItem,
@@ -255,6 +255,32 @@ def create_move_plan(plan: MovePlanCreate, db: Session = Depends(get_db), curren
     return db_plan
 
 
+@app.put("/move-plans/{plan_id}", response_model=MovePlanResponse)
+def update_move_plan(plan_id: int, plan: MovePlanUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    db_plan = db.query(MovePlan).filter(MovePlan.id == plan_id).first()
+    if not db_plan:
+        raise HTTPException(status_code=404, detail="计划不存在")
+    update_data = plan.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_plan, key, value)
+    db.commit()
+    db.refresh(db_plan)
+    return db_plan
+
+
+@app.delete("/move-plans/{plan_id}")
+def delete_move_plan(plan_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    db_plan = db.query(MovePlan).filter(MovePlan.id == plan_id).first()
+    if not db_plan:
+        raise HTTPException(status_code=404, detail="计划不存在")
+    linked_tasks = db.query(MoveTask).filter(MoveTask.move_plan_id == plan_id).count()
+    if linked_tasks > 0:
+        raise HTTPException(status_code=400, detail=f"该计划下有{linked_tasks}个关联任务，无法删除")
+    db.delete(db_plan)
+    db.commit()
+    return {"message": "删除成功"}
+
+
 @app.get("/move-tasks", response_model=List[MoveTaskResponse])
 def get_move_tasks(skip: int = 0, limit: int = 100, bookshelf_id: int = None, status: str = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     query = db.query(MoveTask)
@@ -386,36 +412,77 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
         for item in humidity_data
     ]
 
-    mold_subquery = db.query(
+    risk_subquery = db.query(
         InspectionRecord.bookshelf_id,
         func.max(InspectionRecord.inspection_time).label("max_time")
     ).group_by(InspectionRecord.bookshelf_id).subquery()
 
-    mold_data = db.query(
+    risk_data = db.query(
         InspectionRecord.bookshelf_id,
-        Bookshelf.code,
+        Bookshelf.code.label("bookshelf_code"),
+        Bookshelf.name.label("bookshelf_name"),
+        StorageArea.id.label("area_id"),
         StorageArea.name.label("area_name"),
-        InspectionRecord.mold_level,
         InspectionRecord.humidity,
+        InspectionRecord.temperature,
+        InspectionRecord.mold_level,
+        InspectionRecord.has_odor,
+        InspectionRecord.has_pest,
         InspectionRecord.inspection_time
     ).join(Bookshelf, InspectionRecord.bookshelf_id == Bookshelf.id)\
      .join(StorageArea, Bookshelf.storage_area_id == StorageArea.id)\
-     .join(mold_subquery,
-           and_(InspectionRecord.bookshelf_id == mold_subquery.c.bookshelf_id,
-                InspectionRecord.inspection_time == mold_subquery.c.max_time))\
-     .filter(InspectionRecord.mold_level > 0)\
-     .order_by(InspectionRecord.mold_level.desc()).limit(10).all()
+     .join(risk_subquery,
+           and_(InspectionRecord.bookshelf_id == risk_subquery.c.bookshelf_id,
+                InspectionRecord.inspection_time == risk_subquery.c.max_time)).all()
+
+    all_risk_items = []
+    for item in risk_data:
+        risk_reasons, risk_description, suggest_move = generate_risk_description(
+            item.humidity, item.mold_level, item.has_odor, item.has_pest
+        )
+        all_risk_items.append({
+            "item": item,
+            "risk_reasons": risk_reasons,
+            "risk_description": risk_description,
+            "suggest_move": suggest_move,
+        })
+
+    risk_items = [r for r in all_risk_items if r["suggest_move"]]
+    risk_items.sort(key=lambda x: (-len(x["risk_reasons"]), -x["item"].humidity, -x["item"].mold_level))
 
     mold_risks = [
         MoldRiskItem(
-            bookshelf_id=item.bookshelf_id,
-            bookshelf_code=item.code,
-            area_name=item.area_name,
-            mold_level=item.mold_level,
-            humidity=float(item.humidity),
-            inspection_time=item.inspection_time
+            bookshelf_id=r["item"].bookshelf_id,
+            bookshelf_code=r["item"].bookshelf_code,
+            area_name=r["item"].area_name,
+            mold_level=r["item"].mold_level,
+            humidity=float(r["item"].humidity),
+            has_odor=r["item"].has_odor,
+            has_pest=r["item"].has_pest,
+            inspection_time=r["item"].inspection_time,
+            risk_description=r["risk_description"]
         )
-        for item in mold_data
+        for r in risk_items[:10]
+    ]
+
+    risk_inspections = [
+        RiskInspectionItem(
+            bookshelf_id=r["item"].bookshelf_id,
+            bookshelf_code=r["item"].bookshelf_code,
+            bookshelf_name=r["item"].bookshelf_name,
+            area_id=r["item"].area_id,
+            area_name=r["item"].area_name,
+            humidity=float(r["item"].humidity),
+            temperature=float(r["item"].temperature),
+            mold_level=r["item"].mold_level,
+            has_odor=r["item"].has_odor,
+            has_pest=r["item"].has_pest,
+            inspection_time=r["item"].inspection_time,
+            suggest_move=r["suggest_move"],
+            risk_reasons=r["risk_reasons"],
+            risk_description=r["risk_description"]
+        )
+        for r in risk_items
     ]
 
     move_data = db.query(
@@ -428,15 +495,32 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
         MoveTask.planned_start_time,
         MoveTask.planned_end_time
     ).join(Bookshelf, MoveTask.bookshelf_id == Bookshelf.id)\
-     .filter(MoveTask.status.in_(["pending", "in_progress"]))\
-     .order_by(MoveTask.planned_start_time).limit(10).all()
+     .order_by(MoveTask.planned_start_time.desc()).limit(20).all()
 
-    def calculate_progress(status, actual_start, actual_end):
+    def calculate_progress(status, actual_start, actual_end, planned_start, planned_end):
         if status == "completed":
             return 100
         elif status == "in_progress":
+            if actual_start and planned_end:
+                now = datetime.now()
+                if now >= planned_end:
+                    return 90
+                total_duration = (planned_end - actual_start).total_seconds()
+                elapsed = (now - actual_start).total_seconds()
+                if total_duration > 0:
+                    progress = int((elapsed / total_duration) * 90)
+                    return max(10, min(90, progress))
             return 50
         elif status == "pending":
+            if planned_start and planned_end:
+                now = datetime.now()
+                if now > planned_end:
+                    return 10
+                total_duration = (planned_end - planned_start).total_seconds()
+                elapsed = (now - planned_start).total_seconds()
+                if total_duration > 0 and elapsed > 0:
+                    progress = int((elapsed / total_duration) * 10)
+                    return max(0, min(10, progress))
             return 0
         return 0
 
@@ -446,7 +530,7 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
             bookshelf_code=item.code,
             responsible_person=item.responsible_person,
             status=item.status,
-            progress=calculate_progress(item.status, item.actual_start_time, item.actual_end_time)
+            progress=calculate_progress(item.status, item.actual_start_time, item.actual_end_time, item.planned_start_time, item.planned_end_time)
         )
         for item in move_data
     ]
@@ -472,55 +556,6 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
         )
         for item in device_data
     ]
-
-    risk_subquery = db.query(
-        InspectionRecord.bookshelf_id,
-        func.max(InspectionRecord.inspection_time).label("max_time")
-    ).group_by(InspectionRecord.bookshelf_id).subquery()
-
-    risk_data = db.query(
-        InspectionRecord.bookshelf_id,
-        Bookshelf.code.label("bookshelf_code"),
-        Bookshelf.name.label("bookshelf_name"),
-        StorageArea.id.label("area_id"),
-        StorageArea.name.label("area_name"),
-        InspectionRecord.humidity,
-        InspectionRecord.temperature,
-        InspectionRecord.mold_level,
-        InspectionRecord.has_odor,
-        InspectionRecord.has_pest,
-        InspectionRecord.inspection_time
-    ).join(Bookshelf, InspectionRecord.bookshelf_id == Bookshelf.id)\
-     .join(StorageArea, Bookshelf.storage_area_id == StorageArea.id)\
-     .join(risk_subquery,
-           and_(InspectionRecord.bookshelf_id == risk_subquery.c.bookshelf_id,
-                InspectionRecord.inspection_time == risk_subquery.c.max_time))\
-     .order_by(InspectionRecord.inspection_time.desc()).limit(20).all()
-
-    risk_inspections = []
-    for item in risk_data:
-        risk_reasons, risk_description, suggest_move = generate_risk_description(
-            item.humidity, item.mold_level, item.has_odor, item.has_pest
-        )
-        risk_inspections.append(RiskInspectionItem(
-            bookshelf_id=item.bookshelf_id,
-            bookshelf_code=item.bookshelf_code,
-            bookshelf_name=item.bookshelf_name,
-            area_id=item.area_id,
-            area_name=item.area_name,
-            humidity=float(item.humidity),
-            temperature=float(item.temperature),
-            mold_level=item.mold_level,
-            has_odor=item.has_odor,
-            has_pest=item.has_pest,
-            inspection_time=item.inspection_time,
-            suggest_move=suggest_move,
-            risk_reasons=risk_reasons,
-            risk_description=risk_description
-        ))
-
-    risk_inspections = [r for r in risk_inspections if r.suggest_move]
-    risk_inspections.sort(key=lambda x: (-len(x.risk_reasons), -x.humidity, -x.mold_level))
 
     return DashboardResponse(
         stats=stats,
