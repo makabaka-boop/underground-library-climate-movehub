@@ -238,8 +238,8 @@ const Dashboard = () => {
                     <TableRow>
                       <TableCell>书架编号</TableCell>
                       <TableCell>所属库区</TableCell>
-                      <TableCell>霉斑等级</TableCell>
-                      <TableCell>当前湿度</TableCell>
+                      <TableCell>风险项</TableCell>
+                      <TableCell>风险说明</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -248,13 +248,28 @@ const Dashboard = () => {
                         <TableCell>{item.bookshelf_code}</TableCell>
                         <TableCell>{item.area_name}</TableCell>
                         <TableCell>
-                          <Chip
-                            label={`${item.mold_level}级`}
-                            size="small"
-                            sx={{ bgcolor: getMoldLevelColor(item.mold_level), color: 'white' }}
-                          />
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                            <Chip
+                              label={`霉斑${item.mold_level}级`}
+                              size="small"
+                              sx={{ bgcolor: getMoldLevelColor(item.mold_level), color: 'white' }}
+                            />
+                            <Chip
+                              label={`${item.humidity}%湿度`}
+                              size="small"
+                              sx={{ bgcolor: getHumidityColor(item.humidity), color: 'white' }}
+                            />
+                            {item.has_odor && <Chip label="异味" size="small" color="error" />}
+                            {item.has_pest && <Chip label="虫害" size="small" color="error" />}
+                          </Box>
                         </TableCell>
-                        <TableCell>{item.humidity}%</TableCell>
+                        <TableCell sx={{ maxWidth: 150 }}>
+                          <MuiTooltip title={item.risk_description}>
+                            <Typography variant="body2" noWrap>
+                              {item.risk_description}
+                            </Typography>
+                          </MuiTooltip>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
