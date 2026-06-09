@@ -176,7 +176,18 @@ const MoveTasks = () => {
   const handleSubmit = async () => {
     try {
       if (editItem) {
-        await updateMoveTask(editItem.id, { status: formData.status });
+        const updateData = {
+          bookshelf_id: formData.bookshelf_id,
+          responsible_person: formData.responsible_person,
+          planned_start_time: formData.planned_start_time,
+          planned_end_time: formData.planned_end_time,
+          source_location: formData.source_location,
+          target_location: formData.target_location,
+          risk_description: formData.risk_description,
+          move_plan_id: formData.move_plan_id || null,
+          status: formData.status,
+        };
+        await updateMoveTask(editItem.id, updateData);
         showSnackbar('更新成功', 'success');
       } else {
         await createMoveTask(formData);
@@ -203,6 +214,17 @@ const MoveTasks = () => {
     }
   };
 
+  const getBookshelfInfo = (bookshelfId) => {
+    const shelf = bookshelves.find((b) => b.id === bookshelfId);
+    return shelf ? `${shelf.code} - ${shelf.name}` : '-';
+  };
+
+  const getPlanName = (planId) => {
+    if (!planId) return '-';
+    const plan = movePlans.find((p) => p.id === planId);
+    return plan ? plan.name : '-';
+  };
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -219,6 +241,7 @@ const MoveTasks = () => {
               <TableRow>
                 <TableCell>书架</TableCell>
                 <TableCell>负责人</TableCell>
+                <TableCell>所属计划</TableCell>
                 <TableCell>计划开始时间</TableCell>
                 <TableCell>计划结束时间</TableCell>
                 <TableCell>源位置</TableCell>
@@ -230,8 +253,9 @@ const MoveTasks = () => {
             <TableBody>
               {moveTasks.map((task) => (
                 <TableRow key={task.id}>
-                  <TableCell>{bookshelves.find((b) => b.id === task.bookshelf_id)?.code || '-'}</TableCell>
+                  <TableCell>{getBookshelfInfo(task.bookshelf_id)}</TableCell>
                   <TableCell>{task.responsible_person}</TableCell>
+                  <TableCell>{getPlanName(task.move_plan_id)}</TableCell>
                   <TableCell>{new Date(task.planned_start_time).toLocaleString()}</TableCell>
                   <TableCell>{new Date(task.planned_end_time).toLocaleString()}</TableCell>
                   <TableCell>{task.source_location}</TableCell>
@@ -248,7 +272,7 @@ const MoveTasks = () => {
               ))}
               {moveTasks.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} align="center">
+                  <TableCell colSpan={9} align="center">
                     暂无数据
                   </TableCell>
                 </TableRow>
@@ -264,135 +288,130 @@ const MoveTasks = () => {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {!editItem ? (
-              <>
-                {fromRiskInspection && riskInfo && (
-                  <Alert severity="warning" icon={<Info />} sx={{ mb: 1 }}>
-                    <Typography variant="subtitle2" gutterBottom fontWeight="bold">
-                      风险巡检转移架建议 - 书架 {riskInfo.bookshelf_code}
+            {fromRiskInspection && riskInfo && !editItem && (
+              <Alert severity="warning" icon={<Info />} sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" gutterBottom fontWeight="bold">
+                  风险巡检转移架建议 - 书架 {riskInfo.bookshelf_code}
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ minWidth: 80 }}>
+                      所属库区:
                     </Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 1 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 80 }}>
-                          所属库区:
-                        </Typography>
-                        <Typography variant="body2" fontWeight="medium">
-                          {riskInfo.area_name}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                        <Chip label={`湿度: ${riskInfo.humidity}%`} size="small" color="error" variant="outlined" />
-                        <Chip label={`霉斑等级: ${riskInfo.mold_level}级`} size="small" color="error" variant="outlined" />
-                        {riskInfo.has_odor && <Chip label="有异味" size="small" color="error" variant="outlined" />}
-                        {riskInfo.has_pest && <Chip label="有虫害" size="small" color="error" variant="outlined" />}
-                      </Box>
-                      <Divider sx={{ my: 0.5 }} />
-                      <Typography variant="body2" color="text.secondary">
-                        建议处理原因:
-                      </Typography>
-                      <Typography variant="body2" sx={{ bgcolor: 'background.paper', p: 1, borderRadius: 1 }}>
-                        {riskInfo.risk_description}
-                      </Typography>
-                    </Box>
-                  </Alert>
-                )}
-                <TextField
-                  select
-                  label="所属计划"
-                  value={formData.move_plan_id}
-                  onChange={(e) => setFormData({ ...formData, move_plan_id: parseInt(e.target.value) || '' })}
-                  fullWidth
-                >
-                  <MenuItem value="">无</MenuItem>
-                  {movePlans.map((plan) => (
-                    <MenuItem key={plan.id} value={plan.id}>
-                      {plan.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <TextField
-                  select
-                  label="书架"
-                  value={formData.bookshelf_id}
-                  onChange={(e) => setFormData({ ...formData, bookshelf_id: parseInt(e.target.value) })}
-                  fullWidth
-                  required
-                  disabled={fromRiskInspection}
-                >
-                  {bookshelves.map((shelf) => (
-                    <MenuItem key={shelf.id} value={shelf.id}>
-                      {shelf.code} - {shelf.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <TextField
-                  label="负责人"
-                  value={formData.responsible_person}
-                  onChange={(e) => setFormData({ ...formData, responsible_person: e.target.value })}
-                  fullWidth
-                  required
-                />
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    label="计划开始时间"
-                    type="datetime-local"
-                    value={formData.planned_start_time}
-                    onChange={(e) => setFormData({ ...formData, planned_start_time: e.target.value })}
-                    fullWidth
-                    required
-                    InputLabelProps={{ shrink: true }}
-                  />
-                  <TextField
-                    label="计划结束时间"
-                    type="datetime-local"
-                    value={formData.planned_end_time}
-                    onChange={(e) => setFormData({ ...formData, planned_end_time: e.target.value })}
-                    fullWidth
-                    required
-                    InputLabelProps={{ shrink: true }}
-                  />
+                    <Typography variant="body2" fontWeight="medium">
+                      {riskInfo.area_name}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    <Chip label={`湿度: ${riskInfo.humidity}%`} size="small" color="error" variant="outlined" />
+                    <Chip label={`霉斑等级: ${riskInfo.mold_level}级`} size="small" color="error" variant="outlined" />
+                    {riskInfo.has_odor && <Chip label="有异味" size="small" color="error" variant="outlined" />}
+                    {riskInfo.has_pest && <Chip label="有虫害" size="small" color="error" variant="outlined" />}
+                  </Box>
+                  <Divider sx={{ my: 0.5 }} />
+                  <Typography variant="body2" color="text.secondary">
+                    建议处理原因:
+                  </Typography>
+                  <Typography variant="body2" sx={{ bgcolor: 'background.paper', p: 1, borderRadius: 1 }}>
+                    {riskInfo.risk_description}
+                  </Typography>
                 </Box>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    label="源位置"
-                    value={formData.source_location}
-                    onChange={(e) => setFormData({ ...formData, source_location: e.target.value })}
-                    fullWidth
-                    required
-                    disabled={fromRiskInspection}
-                  />
-                  <TextField
-                    label="目标位置"
-                    value={formData.target_location}
-                    onChange={(e) => setFormData({ ...formData, target_location: e.target.value })}
-                    fullWidth
-                    required
-                  />
-                </Box>
-                <TextField
-                  label="风险说明"
-                  value={formData.risk_description}
-                  onChange={(e) => setFormData({ ...formData, risk_description: e.target.value })}
-                  fullWidth
-                  multiline
-                  rows={3}
-                />
-              </>
-            ) : (
-              <TextField
-                select
-                label="状态"
-                value={formData.status}
-                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                fullWidth
-              >
-                {statusOptions.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </TextField>
+              </Alert>
             )}
+            <TextField
+              select
+              label="所属计划"
+              value={formData.move_plan_id}
+              onChange={(e) => setFormData({ ...formData, move_plan_id: parseInt(e.target.value) || '' })}
+              fullWidth
+            >
+              <MenuItem value="">无</MenuItem>
+              {movePlans.map((plan) => (
+                <MenuItem key={plan.id} value={plan.id}>
+                  {plan.name}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="书架"
+              value={formData.bookshelf_id}
+              onChange={(e) => setFormData({ ...formData, bookshelf_id: parseInt(e.target.value) })}
+              fullWidth
+              required
+              disabled={fromRiskInspection && !editItem}
+            >
+              {bookshelves.map((shelf) => (
+                <MenuItem key={shelf.id} value={shelf.id}>
+                  {shelf.code} - {shelf.name}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="负责人"
+              value={formData.responsible_person}
+              onChange={(e) => setFormData({ ...formData, responsible_person: e.target.value })}
+              fullWidth
+              required
+            />
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                label="计划开始时间"
+                type="datetime-local"
+                value={formData.planned_start_time}
+                onChange={(e) => setFormData({ ...formData, planned_start_time: e.target.value })}
+                fullWidth
+                required
+                InputLabelProps={{ shrink: true }}
+              />
+              <TextField
+                label="计划结束时间"
+                type="datetime-local"
+                value={formData.planned_end_time}
+                onChange={(e) => setFormData({ ...formData, planned_end_time: e.target.value })}
+                fullWidth
+                required
+                InputLabelProps={{ shrink: true }}
+              />
+            </Box>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                label="源位置"
+                value={formData.source_location}
+                onChange={(e) => setFormData({ ...formData, source_location: e.target.value })}
+                fullWidth
+                required
+                disabled={fromRiskInspection && !editItem}
+              />
+              <TextField
+                label="目标位置"
+                value={formData.target_location}
+                onChange={(e) => setFormData({ ...formData, target_location: e.target.value })}
+                fullWidth
+                required
+              />
+            </Box>
+            <TextField
+              label="风险说明"
+              value={formData.risk_description}
+              onChange={(e) => setFormData({ ...formData, risk_description: e.target.value })}
+              fullWidth
+              multiline
+              rows={3}
+            />
+            <TextField
+              select
+              label="状态"
+              value={formData.status}
+              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+              fullWidth
+            >
+              {statusOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </TextField>
           </Box>
         </DialogContent>
         <DialogActions>

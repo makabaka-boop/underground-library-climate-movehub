@@ -147,8 +147,16 @@ class MoveTaskCreate(MoveTaskBase):
 
 
 class MoveTaskUpdate(BaseModel):
+    bookshelf_id: Optional[int] = None
+    responsible_person: Optional[str] = None
+    planned_start_time: Optional[datetime] = None
+    planned_end_time: Optional[datetime] = None
     actual_start_time: Optional[datetime] = None
     actual_end_time: Optional[datetime] = None
+    source_location: Optional[str] = None
+    target_location: Optional[str] = None
+    risk_description: Optional[str] = None
+    move_plan_id: Optional[int] = None
     status: Optional[str] = None
     remarks: Optional[str] = None
 
@@ -207,6 +215,8 @@ class MoldRiskItem(BaseModel):
     area_name: str
     mold_level: int
     humidity: float
+    has_odor: bool = False
+    has_pest: bool = False
     inspection_time: datetime
 
 
