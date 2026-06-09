@@ -121,6 +121,12 @@ class MovePlanCreate(MovePlanBase):
     pass
 
 
+class MovePlanUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+
 class MovePlanResponse(MovePlanBase):
     id: int
     created_by: int
@@ -147,8 +153,16 @@ class MoveTaskCreate(MoveTaskBase):
 
 
 class MoveTaskUpdate(BaseModel):
+    bookshelf_id: Optional[int] = None
+    responsible_person: Optional[str] = None
+    planned_start_time: Optional[datetime] = None
+    planned_end_time: Optional[datetime] = None
     actual_start_time: Optional[datetime] = None
     actual_end_time: Optional[datetime] = None
+    source_location: Optional[str] = None
+    target_location: Optional[str] = None
+    risk_description: Optional[str] = None
+    move_plan_id: Optional[int] = None
     status: Optional[str] = None
     remarks: Optional[str] = None
 
