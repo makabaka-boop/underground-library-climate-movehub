@@ -110,6 +110,15 @@ const Dashboard = () => {
     }
   };
 
+  const getTaskStatusColor = (status) => {
+    switch (status) {
+      case 'pending': return 'default';
+      case 'in_progress': return 'primary';
+      case 'completed': return 'success';
+      default: return 'default';
+    }
+  };
+
   if (loading) {
     return <LinearProgress />;
   }
@@ -293,7 +302,7 @@ const Dashboard = () => {
                           <Chip
                             label={getTaskStatusText(item.status)}
                             size="small"
-                            color={item.status === 'in_progress' ? 'primary' : 'default'}
+                            color={getTaskStatusColor(item.status)}
                           />
                         </TableCell>
                         <TableCell sx={{ width: 150 }}>
@@ -316,7 +325,7 @@ const Dashboard = () => {
                 </Table>
               </TableContainer>
             ) : (
-              <Alert severity="info">暂无进行中的移架任务</Alert>
+              <Alert severity="info">暂无移架任务</Alert>
             )}
           </Paper>
         </Grid>
