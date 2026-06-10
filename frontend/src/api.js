@@ -143,6 +143,16 @@ export const createMovePlan = async (data) => {
   return response.data;
 };
 
+export const updateMovePlan = async (id, data) => {
+  const response = await api.put(`/move-plans/${id}`, data);
+  return response.data;
+};
+
+export const deleteMovePlan = async (id) => {
+  const response = await api.delete(`/move-plans/${id}`);
+  return response.data;
+};
+
 export const getMoveTasks = async (bookshelfId = null, status = null) => {
   const params = {};
   if (bookshelfId) params.bookshelf_id = bookshelfId;

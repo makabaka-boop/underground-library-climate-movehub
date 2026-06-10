@@ -255,6 +255,28 @@ def create_move_plan(plan: MovePlanCreate, db: Session = Depends(get_db), curren
     return db_plan
 
 
+@app.put("/move-plans/{plan_id}", response_model=MovePlanResponse)
+def update_move_plan(plan_id: int, plan: MovePlanCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    db_plan = db.query(MovePlan).filter(MovePlan.id == plan_id).first()
+    if not db_plan:
+        raise HTTPException(status_code=404, detail="移架计划不存在")
+    for key, value in plan.dict().items():
+        setattr(db_plan, key, value)
+    db.commit()
+    db.refresh(db_plan)
+    return db_plan
+
+
+@app.delete("/move-plans/{plan_id}")
+def delete_move_plan(plan_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    db_plan = db.query(MovePlan).filter(MovePlan.id == plan_id).first()
+    if not db_plan:
+        raise HTTPException(status_code=404, detail="移架计划不存在")
+    db.delete(db_plan)
+    db.commit()
+    return {"message": "删除成功"}
+
+
 @app.get("/move-tasks", response_model=List[MoveTaskResponse])
 def get_move_tasks(skip: int = 0, limit: int = 100, bookshelf_id: int = None, status: str = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     query = db.query(MoveTask)
@@ -292,6 +314,14 @@ def update_move_task(task_id: int, task: MoveTaskUpdate, db: Session = Depends(g
     if not db_task:
         raise HTTPException(status_code=404, detail="任务不存在")
     update_data = task.dict(exclude_unset=True)
+    if "status" in update_data:
+        new_status = update_data["status"]
+        if new_status == "in_progress" and not db_task.actual_start_time:
+            update_data["actual_start_time"] = datetime.utcnow()
+        if new_status == "completed" and not db_task.actual_end_time:
+            update_data["actual_end_time"] = datetime.utcnow()
+            if not db_task.actual_start_time:
+                update_data["actual_start_time"] = db_task.planned_start_time or datetime.utcnow()
     for key, value in update_data.items():
         setattr(db_task, key, value)
     db.commit()
@@ -323,7 +353,7 @@ def generate_risk_description(humidity, mold_level, has_odor, has_pest):
     risk_reasons = []
     description_parts = []
     
-    if humidity > HUMIDITY_THRESHOLD:
+    if humidity >= HUMIDITY_THRESHOLD:
         risk_reasons.append("humidity_high")
         description_parts.append(f"湿度超标（当前{humidity}%，阈值{HUMIDITY_THRESHOLD}%）")
     
@@ -391,32 +421,38 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
         func.max(InspectionRecord.inspection_time).label("max_time")
     ).group_by(InspectionRecord.bookshelf_id).subquery()
 
-    mold_data = db.query(
+    mold_raw_data = db.query(
         InspectionRecord.bookshelf_id,
         Bookshelf.code,
         StorageArea.name.label("area_name"),
         InspectionRecord.mold_level,
         InspectionRecord.humidity,
+        InspectionRecord.has_odor,
+        InspectionRecord.has_pest,
         InspectionRecord.inspection_time
     ).join(Bookshelf, InspectionRecord.bookshelf_id == Bookshelf.id)\
      .join(StorageArea, Bookshelf.storage_area_id == StorageArea.id)\
      .join(mold_subquery,
            and_(InspectionRecord.bookshelf_id == mold_subquery.c.bookshelf_id,
                 InspectionRecord.inspection_time == mold_subquery.c.max_time))\
-     .filter(InspectionRecord.mold_level > 0)\
-     .order_by(InspectionRecord.mold_level.desc()).limit(10).all()
+     .all()
 
-    mold_risks = [
-        MoldRiskItem(
-            bookshelf_id=item.bookshelf_id,
-            bookshelf_code=item.code,
-            area_name=item.area_name,
-            mold_level=item.mold_level,
-            humidity=float(item.humidity),
-            inspection_time=item.inspection_time
+    mold_risks = []
+    for item in mold_raw_data:
+        risk_reasons, risk_description, is_risk = generate_risk_description(
+            item.humidity, item.mold_level, item.has_odor, item.has_pest
         )
-        for item in mold_data
-    ]
+        if is_risk:
+            mold_risks.append(MoldRiskItem(
+                bookshelf_id=item.bookshelf_id,
+                bookshelf_code=item.code,
+                area_name=item.area_name,
+                mold_level=item.mold_level,
+                humidity=float(item.humidity),
+                inspection_time=item.inspection_time
+            ))
+    mold_risks.sort(key=lambda x: (-x.mold_level, -x.humidity))
+    mold_risks = mold_risks[:10]
 
     move_data = db.query(
         MoveTask.id,
@@ -428,14 +464,20 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
         MoveTask.planned_start_time,
         MoveTask.planned_end_time
     ).join(Bookshelf, MoveTask.bookshelf_id == Bookshelf.id)\
-     .filter(MoveTask.status.in_(["pending", "in_progress"]))\
-     .order_by(MoveTask.planned_start_time).limit(10).all()
+     .order_by(MoveTask.planned_start_time.desc()).limit(10).all()
 
-    def calculate_progress(status, actual_start, actual_end):
+    def calculate_progress(status, actual_start, actual_end, planned_start, planned_end):
         if status == "completed":
             return 100
         elif status == "in_progress":
-            return 50
+            if actual_start and planned_end and planned_start:
+                now = datetime.utcnow()
+                planned_duration = (planned_end - planned_start).total_seconds()
+                if planned_duration > 0:
+                    elapsed = (now - actual_start).total_seconds()
+                    progress = int((elapsed / planned_duration) * 100)
+                    return min(max(progress, 1), 99)
+            return 0
         elif status == "pending":
             return 0
         return 0
@@ -446,7 +488,7 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
             bookshelf_code=item.code,
             responsible_person=item.responsible_person,
             status=item.status,
-            progress=calculate_progress(item.status, item.actual_start_time, item.actual_end_time)
+            progress=calculate_progress(item.status, item.actual_start_time, item.actual_end_time, item.planned_start_time, item.planned_end_time)
         )
         for item in move_data
     ]
